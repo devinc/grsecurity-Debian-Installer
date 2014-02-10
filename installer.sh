@@ -9,6 +9,13 @@
 # * The lguest folder seems to have been moved as of kernel 3.3, changed the code to
 #   try to find the directory dynamically
 #
+# Version 1.1.1, 2013-10-20
+# * Grsecurity.net switched to two RSS feeds for the 2.6 and 3.x stable branches
+# * Added gcc-plugin-dev as a requirement
+# * Fixed issues with architecture in the kernel package name after creation
+#
+# Version 1.2, 2013-12-31
+# * Switched to XZ archives, https://www.kernel.org/happy-new-year-and-good-bye-bzip2.html
 
 
 if [ `whoami` != "root" ]; then
@@ -33,7 +40,7 @@ The installation will be carried out in the following steps:
 2. Letting you chose which version you would like to install
 3. Download PGP keys for download verification (first run only)
 4. Install the following debian packages if needed:
-     build-essential bin86 kernel-package libncurses5-dev zlib1g-dev curl
+     build-essential bin86 kernel-package libncurses5-dev zlib1g-dev curl gcc-plugin-dev xz-utils
 5. Download the kernel source from www.kernel.org
 6. Download the grsecurity patch from grsecurity.net
 7. Verify the downloads and extract the kernel
@@ -47,14 +54,21 @@ The installation will be carried out in the following steps:
 
 "
 
+if [ -z `which curl` ]; then
+	echo "==> Installing curl ..."
+	apt-get -y -qq install curl
+	if [ $? -eq 0 ]; then echo "OK"; else echo "Failed"; exit 1; fi
+fi
+
 echo "==> Checking current versions of grsecurity ..."
 
 STABLE_VERSIONS=`curl -s https://grsecurity.net/stable_rss.php | grep "patch</title>" | sed -r 's/<\/?title>//gi' | sed -e 's/\.patch//g' | sed -e 's/grsecurity-//g'`
+STABLE2_VERSIONS=`curl -s https://grsecurity.net/stable2_rss.php | grep "patch</title>" | sed -r 's/<\/?title>//gi' | sed -e 's/\.patch//g' | sed -e 's/grsecurity-//g'`
 TESTING_VERSIONS=`curl -s https://grsecurity.net/testing_rss.php | grep "patch</title>" | sed -r 's/<\/?title>//gi' | sed -e 's/\.patch//g' | sed -e 's/grsecurity-//g'`
 
 COUNTER=0
 
-for x in $STABLE_VERSIONS; do
+for x in $STABLE_VERSIONS $STABLE2_VERSIONS; do
 
 	let COUNTER=COUNTER+1
 
@@ -117,9 +131,12 @@ fi
 
 
 echo -n "==> Installing packages needed for building the kernel ... ";
-apt-get -y -qq install build-essential bin86 kernel-package libncurses5-dev zlib1g-dev curl
+apt-get -y -qq install build-essential bin86 kernel-package libncurses5-dev zlib1g-dev xz-utils
 if [ $? -eq 0 ]; then echo "OK"; else echo "Failed"; exit 1; fi
 
+GCC_VERSION=`apt-cache policy gcc | grep 'Installed:' | cut -c 16-18`
+apt-get -y -qq install gcc-$GCC_VERSION-plugin-dev
+if [ $? -eq 0 ]; then echo "OK"; else echo "Failed"; exit 1; fi
 
 cd /usr/src
 
@@ -127,21 +144,21 @@ if [ -h linux ]; then
 	rm linux
 fi
 
-if [ ! -f linux-$KERNEL.tar.bz2 ] && [ ! -f linux-$KERNEL.tar ]; then
+if [ ! -f linux-$KERNEL.tar.xz ] && [ ! -f linux-$KERNEL.tar ]; then
 	echo "==> Downloading kernel version $KERNEL ..."
 
 	BRANCH=`echo $KERNEL | cut -c 1`
 
 	if [ $BRANCH -eq 2 ]; then
-		curl -# -O https://www.kernel.org/pub/linux/kernel/v2.6/longterm/v2.6.32/linux-$KERNEL.tar.bz2
+		curl -# -O https://www.kernel.org/pub/linux/kernel/v2.6/longterm/v2.6.32/linux-$KERNEL.tar.xz
 		curl -s -O https://www.kernel.org/pub/linux/kernel/v2.6/longterm/v2.6.32/linux-$KERNEL.tar.sign
 	elif [ $BRANCH -eq 3 ]; then
-		curl -# -O https://www.kernel.org/pub/linux/kernel/v3.0/linux-$KERNEL.tar.bz2
+		curl -# -O https://www.kernel.org/pub/linux/kernel/v3.0/linux-$KERNEL.tar.xz
 		curl -s -O https://www.kernel.org/pub/linux/kernel/v3.0/linux-$KERNEL.tar.sign
 	fi
 
         echo -n "==> Extracting linux-$KERNEL.tar ... "
-        bzip2 -d linux-$KERNEL.tar.bz2
+        unxz linux-$KERNEL.tar.xz
 	if [ $? -eq 0 ]; then echo "OK"; else echo "Failed"; exit 1; fi
 
         echo -n "==> Verifying linux-$KERNEL.tar ... "
@@ -214,8 +231,7 @@ if [ $? -eq 0 ]; then echo "phase 2 OK ... "; else echo "Failed"; exit 1; fi
 cd ..
 
 echo -n "==> Installing kernel ... "
-ARCH=`uname -r | sed 's/.*-//'`
-dpkg -i linux-image-$KERNEL-grsec_`echo $REVISION`_$ARCH.deb
+dpkg -i linux-image-$KERNEL-grsec_`echo $REVISION`_*.deb
 if [ $? -eq 0 ]; then echo "OK"; else echo "Failed"; exit 1; fi
 
 
